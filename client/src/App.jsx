@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   ArrowLeft,
   Check,
@@ -89,6 +90,7 @@ function App() {
   }, [screen, question]);
 
   const isHost = room?.hostId === socket?.id;
+  const inviteUrl = room ? `${location.origin}/?room=${encodeURIComponent(room.code)}` : '';
 
   function createRoom() {
     if (!connected) return setError('Đang kết nối máy chủ, thử lại sau một chút nhé.');
@@ -116,9 +118,8 @@ function App() {
   }
 
   async function copyInvite() {
-    const invite = `${location.origin}/?room=${room.code}`;
     try {
-      await navigator.clipboard.writeText(invite);
+      await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -194,12 +195,12 @@ function App() {
         <section className="room-layout">
           <button className="back-link" onClick={leaveRoom}><ArrowLeft size={16} /> Rời phòng</button>
           <div className="room-heading"><div><div className="eyebrow"><span className="live-label"><span /> PHÒNG ĐANG MỞ</span></div><h1>Phòng chờ<span className="period">.</span></h1><p>Mời mọi người vào phòng, bắt đầu khi cả nhà đã sẵn sàng.</p></div>
-            <div className="room-code-box"><small>MÃ PHÒNG</small><strong>{room.code}</strong><button onClick={copyInvite}><Link2 size={15} /> {copied ? 'Đã sao chép' : 'Mời người chơi'}</button></div>
+            <div className="room-code-box"><small>MÃ PHÒNG</small><strong>{room.code}</strong><button onClick={copyInvite}><Link2 size={15} /> {copied ? 'Đã sao chép' : 'Mời người chơi'}</button><div className="invite-qr" role="img" aria-label={`Mã QR để tham gia phòng ${room.code}`}><QRCodeSVG value={inviteUrl} size={128} level="M" /><span>Quét để vào phòng</span></div></div>
           </div>
           <div className="lobby-content">
             <div className="players-section"><div className="section-heading"><h2>Đang ở đây</h2><span><Users size={15} /> {room.players.length} người</span></div>
               {room.players.length ? <div className="player-list">{room.players.map((player, index) => <div className="player-item" key={player.id}><div className={`player-avatar avatar-${index % 4}`}>{player.avatar}</div><div className="player-meta"><b>{player.name}</b><small>{player.id === room.hostId ? 'Chủ phòng' : 'Đã sẵn sàng'}</small></div>{player.id === room.hostId && <Crown className="host-crown" size={17} />}</div>)}</div> : <div className="empty-players"><div className="empty-orbit">👋</div><b>Đang chờ người chơi...</b><span>Chia sẻ mã phòng để mọi người cùng vào</span></div>}
-              <div className="invite-strip"><div className="invite-icon"><Clipboard size={17} /></div><span><b>Gửi lời mời</b><small>Nhập mã này trên điện thoại của người chơi</small></span><button onClick={copyInvite} aria-label="Sao chép liên kết mời"><Clipboard size={17} /></button></div>
+              <div className="invite-strip"><div className="invite-icon"><Clipboard size={17} /></div><span><b>Gửi lời mời</b><small>Quét QR hoặc mở trang chủ rồi nhập mã phòng</small></span><button onClick={copyInvite} aria-label="Sao chép liên kết mời"><Clipboard size={17} /></button></div>
             </div>
             <aside className="start-section"><div className="start-art"><div className="art-spark spark-one">✳</div><div className="art-spark spark-two">✦</div><div className="art-disc"><PartyPopper size={42} /></div><div className="art-doodle">LET'S<br />PLAY!</div></div><span className="panel-kicker">TRÒ CHƠI ĐẦU TIÊN</span><h2>Tri thức gia đình</h2><p>5 câu hỏi vui. Càng nhanh, điểm càng cao. Chuẩn bị tinh thần nhé!</p>
               {isHost ? <button className="button button-primary start-button" disabled={!room.players.length} onClick={startGame}>Bắt đầu chơi <ChevronRight size={17} /></button> : <div className="waiting-host"><span className="pulse-dot" /> Đang chờ chủ phòng bắt đầu...</div>}
