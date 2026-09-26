@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import {
   ArrowLeft,
@@ -38,7 +38,7 @@ function App() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const serverUrl = import.meta.env.VITE_SERVER_URL || `${location.protocol}//${location.hostname}:3001`;
+    const serverUrl = import.meta.env.VITE_SERVER_URL || location.origin;
     const connection = io(serverUrl);
     setSocket(connection);
     connection.on('connect', () => setConnected(true));
