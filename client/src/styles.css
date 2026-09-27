@@ -26,6 +26,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(47, 126, 100
 .brand b { font-weight: 700; }
 .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: var(--green); transform: rotate(-5deg); }
 .connection { display: inline-flex; align-items: center; gap: 8px; color: #7c8983; font-size: 12px; }
+.topbar-tools { display: flex; align-items: center; gap: 16px; }
+.music-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 9px; border: 1px solid #dce6dd; border-radius: 7px; color: #71817a; background: #fff; font-size: 10px; font-weight: 700; cursor: pointer; }
+.music-toggle.music-on { color: #326d53; border-color: #b9d8a9; background: #f0f7e9; }
 .connection-dot, .live-label > span, .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: #e5ab4f; }
 .is-online .connection-dot, .live-label > span, .pulse-dot { background: #4cae77; }
 .home-layout { display: grid; grid-template-columns: 1.08fr .92fr; column-gap: 76px; row-gap: 47px; padding: 66px 0 42px; flex: 1; align-content: center; }
@@ -210,7 +213,7 @@ h1, h2, p { margin-top: 0; }
   .footer { font-size: 8px; }
 }
 @media (max-width: 450px) {
-  .app-shell { width: calc(100% - 32px); }.topbar { height: 66px; }.brand { font-size: 16px; }.brand-mark { width: 32px; height: 32px; }.connection { font-size: 10px; }
+  .app-shell { width: calc(100% - 32px); }.topbar { height: 66px; }.brand { font-size: 16px; }.brand-mark { width: 32px; height: 32px; }.topbar-tools { gap: 7px; }.connection { gap: 5px; font-size: 9px; }.music-toggle { gap: 4px; min-height: 29px; padding: 0 6px; font-size: 9px; }.music-toggle span { display: none; }
   .room-code-box { min-width: 0; grid-template-columns: minmax(0, 1fr) 116px; column-gap: 8px; padding: 11px; }.invite-qr svg { width: 116px; height: 116px; }
   .welcome-panel h1 { font-size: 46px; }.join-panel { padding: 19px; }.avatar-picker { gap: 4px; }.avatar-option { width: 33px; }
   .footer span:last-child { max-width: 54%; text-align: right; line-height: 1.4; }

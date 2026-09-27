@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 import {
@@ -17,6 +17,8 @@ import {
   Sparkles,
   Trophy,
   Users,
+  Volume2,
+  VolumeX,
   Wifi,
   X,
 } from 'lucide-react';
@@ -58,6 +60,11 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [bingoCard, setBingoCard] = useState(null);
   const [bingoMarked, setBingoMarked] = useState(new Set());
+  const [musicEnabled, setMusicEnabled] = useState(false);
+  const audioContextRef = useRef(null);
+  const musicGainRef = useRef(null);
+  const musicTimerRef = useRef(null);
+  const melodyIndexRef = useRef(0);
 
   useEffect(() => {
     const serverUrl = import.meta.env.VITE_SERVER_URL || location.origin;
@@ -122,8 +129,74 @@ function App() {
     return () => window.clearInterval(timer);
   }, [screen, question]);
 
+  useEffect(() => {
+    const activeGame = ['question', 'results', 'finished', 'bingo', 'bingo-finished'].includes(screen);
+    if (!musicEnabled || !activeGame || !audioContextRef.current) {
+      window.clearInterval(musicTimerRef.current);
+      musicTimerRef.current = null;
+      return undefined;
+    }
+
+    const context = audioContextRef.current;
+    const notes = [261.63, 329.63, 392, 493.88, 392, 329.63, 293.66, 392];
+    const playTone = (frequency, duration, peak, type = 'sine') => {
+      const oscillator = context.createOscillator();
+      const envelope = context.createGain();
+      const startAt = context.currentTime;
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(frequency, startAt);
+      envelope.gain.setValueAtTime(0.0001, startAt);
+      envelope.gain.exponentialRampToValueAtTime(peak, startAt + 0.045);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+      oscillator.connect(envelope);
+      envelope.connect(musicGainRef.current);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + duration + 0.02);
+    };
+    const playNextNote = () => {
+      const index = melodyIndexRef.current;
+      playTone(notes[index % notes.length], 0.58, 0.11);
+      if (index % 4 === 0) playTone(index % 8 === 0 ? 130.81 : 146.83, 1.1, 0.055, 'triangle');
+      melodyIndexRef.current += 1;
+    };
+
+    void context.resume();
+    playNextNote();
+    musicTimerRef.current = window.setInterval(playNextNote, 720);
+    return () => {
+      window.clearInterval(musicTimerRef.current);
+      musicTimerRef.current = null;
+    };
+  }, [musicEnabled, screen]);
+
+  useEffect(() => () => {
+    window.clearInterval(musicTimerRef.current);
+    void audioContextRef.current?.close();
+  }, []);
+
   const isHost = room?.hostId === socket?.id;
   const inviteUrl = room ? `${location.origin}/?room=${encodeURIComponent(room.code)}` : '';
+
+  function toggleMusic() {
+    if (!musicEnabled) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return setError('Trình duyệt này chưa hỗ trợ âm thanh nền.');
+      if (!audioContextRef.current) {
+        const context = new AudioContextClass();
+        const gain = context.createGain();
+        gain.gain.setValueAtTime(0.075, context.currentTime);
+        gain.connect(context.destination);
+        audioContextRef.current = context;
+        musicGainRef.current = gain;
+      }
+      void audioContextRef.current.resume();
+    } else {
+      window.clearInterval(musicTimerRef.current);
+      musicTimerRef.current = null;
+      void audioContextRef.current?.suspend();
+    }
+    setMusicEnabled((enabled) => !enabled);
+  }
 
   function createRoom() {
     if (!connected) return setError('Đang kết nối máy chủ, thử lại sau một chút nhé.');
@@ -202,9 +275,14 @@ function App() {
           <span className="brand-mark"><Gamepad2 size={21} strokeWidth={2.5} /></span>
           <span>nhà mình <b>chơi gì?</b></span>
         </button>
-        <div className={`connection ${connected ? 'is-online' : ''}`}>
-          <span className="connection-dot" />
-          <span>{connected ? 'Đã kết nối' : 'Đang kết nối'}</span>
+        <div className="topbar-tools">
+          <button className={`music-toggle ${musicEnabled ? 'music-on' : ''}`} onClick={toggleMusic} aria-label={musicEnabled ? 'Tắt nhạc nền' : 'Bật nhạc nền'} title={musicEnabled ? 'Tắt nhạc nền' : 'Bật nhạc nền'}>
+            {musicEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}<span>{musicEnabled ? 'Nhạc bật' : 'Nhạc tắt'}</span>
+          </button>
+          <div className={`connection ${connected ? 'is-online' : ''}`}>
+            <span className="connection-dot" />
+            <span>{connected ? 'Đã kết nối' : 'Đang kết nối'}</span>
+          </div>
         </div>
       </header>
 
