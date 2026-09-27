@@ -60,7 +60,7 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [bingoCard, setBingoCard] = useState(null);
   const [bingoMarked, setBingoMarked] = useState(new Set());
-  const [musicEnabled, setMusicEnabled] = useState(false);
+  const [musicEnabled, setMusicEnabled] = useState(true);
   const audioContextRef = useRef(null);
   const musicGainRef = useRef(null);
   const musicTimerRef = useRef(null);
@@ -155,8 +155,8 @@ function App() {
     };
     const playNextNote = () => {
       const index = melodyIndexRef.current;
-      playTone(notes[index % notes.length], 0.58, 0.11);
-      if (index % 4 === 0) playTone(index % 8 === 0 ? 130.81 : 146.83, 1.1, 0.055, 'triangle');
+      playTone(notes[index % notes.length], 0.58, 0.18);
+      if (index % 4 === 0) playTone(index % 8 === 0 ? 130.81 : 146.83, 1.1, 0.09, 'triangle');
       melodyIndexRef.current += 1;
     };
 
@@ -177,19 +177,26 @@ function App() {
   const isHost = room?.hostId === socket?.id;
   const inviteUrl = room ? `${location.origin}/?room=${encodeURIComponent(room.code)}` : '';
 
+  function ensureAudioContext() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!audioContextRef.current) {
+      const context = new AudioContextClass();
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.35, context.currentTime);
+      gain.connect(context.destination);
+      audioContextRef.current = context;
+      musicGainRef.current = gain;
+    }
+    if (audioContextRef.current.state === 'suspended') {
+      void audioContextRef.current.resume();
+    }
+  }
+
   function toggleMusic() {
     if (!musicEnabled) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) return setError('Trình duyệt này chưa hỗ trợ âm thanh nền.');
-      if (!audioContextRef.current) {
-        const context = new AudioContextClass();
-        const gain = context.createGain();
-        gain.gain.setValueAtTime(0.075, context.currentTime);
-        gain.connect(context.destination);
-        audioContextRef.current = context;
-        musicGainRef.current = gain;
-      }
-      void audioContextRef.current.resume();
+      if (!(window.AudioContext || window.webkitAudioContext)) return setError('Trình duyệt này chưa hỗ trợ âm thanh nền.');
+      ensureAudioContext();
     } else {
       window.clearInterval(musicTimerRef.current);
       musicTimerRef.current = null;
@@ -200,16 +207,19 @@ function App() {
 
   function createRoom() {
     if (!connected) return setError('Đang kết nối máy chủ, thử lại sau một chút nhé.');
+    ensureAudioContext();
     socket.emit('room:create');
   }
 
   function joinRoom(event) {
     event.preventDefault();
     if (!connected) return setError('Chưa kết nối được máy chủ.');
+    ensureAudioContext();
     socket.emit('room:join', { code: roomCode.trim().toUpperCase(), name: name.trim(), avatar });
   }
 
   function startGame() {
+    ensureAudioContext();
     socket.emit('game:start', { code: room.code });
   }
 

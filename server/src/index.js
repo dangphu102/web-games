@@ -397,7 +397,7 @@ function launchBingo(room) {
   room.phase = 'bingo';
   room.calledNumbers = [];
   room.bingoWinner = null;
-  room.bingoMode = 'manual';
+  room.bingoMode = 'auto';
   clearInterval(room.bingoTimer);
   room.bingoTimer = null;
   for (const player of room.players.values()) {
@@ -408,6 +408,7 @@ function launchBingo(room) {
       markedNumbers: [...player.markedNumbers],
     });
   }
+  room.bingoTimer = setInterval(() => drawBingoNumber(room), 3000);
   io.to(room.code).emit('game:bingo-start', roomState(room));
   broadcastRoom(room);
 }
