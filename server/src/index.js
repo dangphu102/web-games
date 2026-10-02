@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { randomInt } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 import express from 'express';
 import cors from 'cors';
 import { Server } from 'socket.io';
@@ -10,6 +11,21 @@ const io = new Server(httpServer, { cors: { origin: process.env.CLIENT_ORIGIN ||
 const PORT = Number(process.env.PORT) || 3001;
 const roomMap = new Map();
 const roomAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function getLanAddress() {
+  const candidates = Object.entries(networkInterfaces()).flatMap(([name, addresses]) =>
+    (addresses || [])
+      .filter(({ address, family, internal }) => {
+        if (internal || (family !== 'IPv4' && family !== 4)) return false;
+        return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address);
+      })
+      .map(({ address }) => ({ name, address })),
+  );
+  return candidates.find(({ name }) => /wi-?fi|wireless/i.test(name))?.address
+    || candidates[0]?.address
+    || null;
+}
+
 const avatars = new Set(['🦊', '🐼', '🐸', '🐯', '🐰', '🐻', '🐙', '🦄']);
 const questionSet = [
   { text: 'Loài động vật nào ngủ đứng?', options: ['Ngựa', 'Rái cá', 'Gấu trúc', 'Cá heo'], answer: 0 },
@@ -658,6 +674,10 @@ function finishBluffRound(room) {
 }
 
 io.on('connection', (socket) => {
+  socket.on('network:get-address', () => {
+    socket.emit('network:address', getLanAddress());
+  });
+
   socket.on('room:create', () => {
     const code = makeCode();
     const room = { code, hostId: socket.id, players: new Map(), phase: 'lobby', game: 'quiz', gameType: 'quiz', topic: 'mixed', quizQuestions: [], calledNumbers: [], bingoWinner: null, bingoMode: 'manual', bingoTimer: null, advanceTimer: null, questionIndex: 0, answers: new Map(), votes: new Map(), timer: null };

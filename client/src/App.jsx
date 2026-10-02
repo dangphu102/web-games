@@ -105,6 +105,7 @@ function hasBingo(card, markedNumbers) {
 function App() {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
+  const [lanAddress, setLanAddress] = useState('');
   const [screen, setScreen] = useState('home');
   const [room, setRoom] = useState(null);
   const [roomCode, setRoomCode] = useState(new URLSearchParams(location.search).get('room')?.toUpperCase() || '');
@@ -132,7 +133,13 @@ function App() {
     const connection = io(serverUrl);
     setSocket(connection);
 
-    connection.on('connect', () => setConnected(true));
+    connection.on('connect', () => {
+      setConnected(true);
+      connection.emit('network:get-address');
+    });
+    connection.on('network:address', (address) => {
+      if (address) setLanAddress(address);
+    });
     connection.on('disconnect', () => setConnected(false));
     connection.on('room:created', (data) => {
       setRoom(data);
@@ -282,7 +289,10 @@ function App() {
 
   const isHost = room?.hostId === socket?.id;
   const minimumPlayers = ['drawing', 'bluff'].includes(room?.game) ? 2 : 1;
-  const inviteUrl = room ? `${location.origin}/?room=${encodeURIComponent(room.code)}` : '';
+  const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+  const inviteHost = isLocalHost && lanAddress ? lanAddress : location.hostname;
+  const inviteOrigin = `${location.protocol}//${inviteHost}${location.port ? `:${location.port}` : ''}`;
+  const inviteUrl = room ? `${inviteOrigin}/?room=${encodeURIComponent(room.code)}` : '';
 
   function ensureAudioContext() {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
