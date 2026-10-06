@@ -435,13 +435,15 @@ function launchBingo(room) {
   for (const player of room.players.values()) {
     player.bingoCard = makeBingoCard();
     player.markedNumbers = new Set([0]);
+  }
+  room.bingoTimer = setInterval(() => drawBingoNumber(room), 3000);
+  io.to(room.code).emit('game:bingo-start', roomState(room));
+  for (const player of room.players.values()) {
     io.to(player.id).emit('bingo:card', {
       card: player.bingoCard,
       markedNumbers: [...player.markedNumbers],
     });
   }
-  room.bingoTimer = setInterval(() => drawBingoNumber(room), 3000);
-  io.to(room.code).emit('game:bingo-start', roomState(room));
   broadcastRoom(room);
 }
 
