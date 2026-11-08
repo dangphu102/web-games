@@ -11,6 +11,121 @@ const io = new Server(httpServer, { cors: { origin: process.env.CLIENT_ORIGIN ||
 const PORT = Number(process.env.PORT) || 3001;
 const roomMap = new Map();
 const roomAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const snakeWidth = 30;
+const snakeHeight = 20;
+
+function makeSnakeState(room) {
+  return {
+    width: snakeWidth,
+    height: snakeHeight,
+    tick: room.snakeTick,
+    food: room.snakeFood,
+    players: [...room.players.values()].map(({ id, name, avatar, score, snake, direction, alive }) => ({ id, name, avatar, score, snake, direction, alive })),
+  };
+}
+
+function placeSnakeFood(room) {
+  const occupied = new Set([...room.players.values()].flatMap((player) => player.snake.map(({ x, y }) => `${x},${y}`)));
+  const available = [];
+  for (let y = 0; y < snakeHeight; y += 1) {
+    for (let x = 0; x < snakeWidth; x += 1) {
+      if (!occupied.has(`${x},${y}`)) available.push({ x, y });
+    }
+  }
+  room.snakeFood = available.length ? available[randomInt(available.length)] : null;
+}
+
+function finishSnakeGame(room) {
+  if (room.phase !== 'snake') return;
+  clearInterval(room.snakeTimer);
+  room.snakeTimer = null;
+  const survivor = [...room.players.values()].find((player) => player.alive);
+  room.snakeWinner = survivor ? { id: survivor.id, name: survivor.name, avatar: survivor.avatar } : null;
+  room.phase = 'finished';
+  const state = roomState(room);
+  io.to(room.code).emit('game:finished', { room: state });
+  broadcastRoom(room);
+}
+
+function advanceSnake(room) {
+  if (room.phase !== 'snake') return;
+  const alivePlayers = [...room.players.values()].filter((player) => player.alive);
+  if (room.snakeMultiplayer ? alivePlayers.length <= 1 : alivePlayers.length === 0) return finishSnakeGame(room);
+
+  const moves = new Map();
+  for (const player of alivePlayers) {
+    const vector = { UP: [0, -1], DOWN: [0, 1], LEFT: [-1, 0], RIGHT: [1, 0] }[player.direction];
+    const head = player.snake[0];
+    const next = { x: head.x + vector[0], y: head.y + vector[1] };
+    const eating = room.snakeFood?.x === next.x && room.snakeFood?.y === next.y;
+    moves.set(player.id, { next, eating });
+  }
+
+  const heads = new Map();
+  let ateFood = false;
+  for (const [id, move] of moves) {
+    const key = `${move.next.x},${move.next.y}`;
+    heads.set(key, [...(heads.get(key) || []), id]);
+  }
+  const dead = new Set();
+  for (const player of alivePlayers) {
+    const { next, eating } = moves.get(player.id);
+    if (next.x < 0 || next.x >= snakeWidth || next.y < 0 || next.y >= snakeHeight || heads.get(`${next.x},${next.y}`).length > 1) {
+      dead.add(player.id);
+      continue;
+    }
+    for (const other of alivePlayers) {
+      const body = moves.get(other.id).eating ? other.snake : other.snake.slice(0, -1);
+      if (body.some((segment) => segment.x === next.x && segment.y === next.y)) {
+        dead.add(player.id);
+        break;
+      }
+    }
+  }
+
+  for (const player of alivePlayers) {
+    if (dead.has(player.id)) {
+      player.alive = false;
+      continue;
+    }
+    const { next, eating } = moves.get(player.id);
+    player.snake.unshift(next);
+    if (eating) {
+      player.score += 1;
+      ateFood = true;
+    } else {
+      player.snake.pop();
+    }
+  }
+  if (ateFood) placeSnakeFood(room);
+  room.snakeTick += 1;
+  io.to(room.code).emit('snake:state', makeSnakeState(room));
+  broadcastRoom(room);
+  const remainingPlayers = [...room.players.values()].filter((player) => player.alive).length;
+  if (room.snakeMultiplayer ? remainingPlayers <= 1 : remainingPlayers === 0) finishSnakeGame(room);
+}
+
+function launchSnake(room) {
+  room.phase = 'snake';
+  room.snakeMultiplayer = room.players.size > 1;
+  room.snakeTick = 0;
+  room.snakeTimer = null;
+  const lanes = [2, 5, 8, 11, 14, 17];
+  [...room.players.values()].forEach((player, index) => {
+    const lane = Math.floor(index / 2);
+    const y = lanes[lane];
+    const facesRight = index % 2 === 0;
+    const x = facesRight ? 3 : snakeWidth - 4;
+    const direction = facesRight ? 'RIGHT' : 'LEFT';
+    player.snake = Array.from({ length: 3 }, (_, segmentIndex) => ({ x: x + (facesRight ? -segmentIndex : segmentIndex), y }));
+    player.direction = direction;
+    player.alive = true;
+  });
+  placeSnakeFood(room);
+  io.to(room.code).emit('snake:state', makeSnakeState(room));
+  broadcastRoom(room);
+  room.snakeTimer = setInterval(() => advanceSnake(room), 145);
+}
 
 function getLanAddress() {
   const candidates = Object.entries(networkInterfaces()).flatMap(([name, addresses]) =>
@@ -395,6 +510,7 @@ function roomState(room) {
     bingoMode: room.bingoMode,
     calledNumbers: room.calledNumbers,
     bingoWinner: room.bingoWinner,
+    snakeWinner: room.snakeWinner,
     players: [...room.players.values()].map(({ id, name, avatar, score }) => ({ id, name, avatar, score })),
     answerCount: room.phase === 'bluff-vote' ? room.votes.size : room.answers.size,
   };
@@ -682,7 +798,7 @@ io.on('connection', (socket) => {
 
   socket.on('room:create', () => {
     const code = makeCode();
-    const room = { code, hostId: socket.id, players: new Map(), phase: 'lobby', game: 'quiz', gameType: 'quiz', topic: 'mixed', quizQuestions: [], calledNumbers: [], bingoWinner: null, bingoMode: 'manual', bingoTimer: null, advanceTimer: null, questionIndex: 0, answers: new Map(), votes: new Map(), timer: null };
+    const room = { code, hostId: socket.id, players: new Map(), phase: 'lobby', game: 'quiz', gameType: 'quiz', topic: 'mixed', quizQuestions: [], calledNumbers: [], bingoWinner: null, snakeWinner: null, bingoMode: 'manual', bingoTimer: null, snakeTimer: null, advanceTimer: null, questionIndex: 0, answers: new Map(), votes: new Map(), timer: null };
     roomMap.set(code, room);
     socket.join(code);
     socket.emit('room:created', roomState(room));
@@ -706,7 +822,7 @@ io.on('connection', (socket) => {
     const room = roomMap.get(String(code || '').toUpperCase());
     if (!isHost(socket, room)) return;
     if (room.phase !== 'lobby') return sendError(socket, 'Chỉ có thể đổi game trong phòng chờ.');
-    if (!['quiz', 'bingo', 'drawing', 'bluff'].includes(game)) return sendError(socket, 'Game này chưa được hỗ trợ.');
+    if (!['quiz', 'bingo', 'drawing', 'bluff', 'snake'].includes(game)) return sendError(socket, 'Game này chưa được hỗ trợ.');
     room.game = game;
     broadcastRoom(room);
   });
@@ -727,6 +843,7 @@ io.on('connection', (socket) => {
     if (room.players.size < minimumPlayers) return sendError(socket, `Cần ít nhất ${minimumPlayers} người chơi để bắt đầu game này.`);
     for (const player of room.players.values()) player.score = 0;
     if (room.game === 'bingo') return launchBingo(room);
+    if (room.game === 'snake') return launchSnake(room);
     if (room.game === 'drawing') {
       room.drawRoundIndex = 0;
       launchDrawingTurn(room);
@@ -806,6 +923,15 @@ io.on('connection', (socket) => {
     advanceQuestion(room);
   });
 
+  socket.on('snake:direction', ({ code, direction } = {}) => {
+    const room = roomMap.get(String(code || '').toUpperCase());
+    const player = room?.players.get(socket.id);
+    if (!player || room.phase !== 'snake' || !player.alive || !['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(direction)) return;
+    const opposites = { UP: 'DOWN', DOWN: 'UP', LEFT: 'RIGHT', RIGHT: 'LEFT' };
+    if (opposites[player.direction] === direction) return;
+    player.direction = direction;
+  });
+
   socket.on('draw:stroke', ({ code, segment } = {}) => {
     const room = roomMap.get(String(code || '').toUpperCase());
     if (!room || room.phase !== 'drawing' || socket.id !== room.currentDrawerId) return;
@@ -875,6 +1001,7 @@ io.on('connection', (socket) => {
         clearTimeout(room.timer);
         clearTimeout(room.advanceTimer);
         clearInterval(room.bingoTimer);
+        clearInterval(room.snakeTimer);
         io.to(room.code).emit('room:closed');
         roomMap.delete(room.code);
         break;
@@ -885,6 +1012,11 @@ io.on('connection', (socket) => {
         if (room.phase === 'question' && room.players.size > 0 && room.answers.size === room.players.size) revealResults(room);
         if (room.phase === 'drawing' && socket.id === room.currentDrawerId) finishDrawingTurn(room);
         if (room.phase === 'drawing' && room.correctGuessers.size >= room.players.size - 1) finishDrawingTurn(room);
+        if (room.phase === 'snake') {
+          io.to(room.code).emit('snake:state', makeSnakeState(room));
+          const remainingPlayers = [...room.players.values()].filter((player) => player.alive).length;
+          if (room.snakeMultiplayer ? remainingPlayers <= 1 : remainingPlayers === 0) finishSnakeGame(room);
+        }
         if (room.phase === 'bluff-submit' && room.answers.size === room.players.size) launchBluffVote(room);
         if (room.phase === 'bluff-vote' && room.votes.size === room.players.size) finishBluffRound(room);
         broadcastRoom(room);

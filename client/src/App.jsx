@@ -3,6 +3,9 @@ import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   ArrowLeft,
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
   Check,
   ChevronRight,
   Clipboard,
@@ -25,7 +28,31 @@ import {
 
 const avatars = ['🦊', '🐼', '🐸', '🐯', '🐰', '🐻', '🐙', '🦄'];
 const colors = ['coral', 'blue', 'yellow', 'green'];
-const gameNames = { quiz: 'Tri thức gia đình', bingo: 'Bingo gia đình', drawing: 'Tam sao thất bản', bluff: 'Ai là kẻ nói dối?' };
+const gameNames = { quiz: 'Tri thức gia đình', bingo: 'Bingo gia đình', drawing: 'Tam sao thất bản', bluff: 'Ai là kẻ nói dối?', snake: 'Rắn săn mồi' };
+const snakeColors = ['#f9795b', '#4b9b74', '#4aa9c5', '#bd79c7', '#e1ae3b', '#667eea', '#e2689a', '#84934c', '#d48542', '#4b83a5', '#8e6d52', '#596b70'];
+
+function SnakeBoard({ game }) {
+  const cells = Array.from({ length: game.width * game.height }, (_, index) => ({
+    x: index % game.width,
+    y: Math.floor(index / game.width),
+  }));
+  const occupied = new Map();
+  game.players.forEach((player, playerIndex) => {
+    player.snake.forEach((segment, segmentIndex) => {
+      occupied.set(`${segment.x},${segment.y}`, { playerIndex, isHead: segmentIndex === 0, alive: player.alive });
+    });
+  });
+
+  return (
+    <div className="snake-board" style={{ '--snake-columns': game.width }} role="img" aria-label="Bản đồ game Rắn săn mồi">
+      {cells.map(({ x, y }) => {
+        const segment = occupied.get(`${x},${y}`);
+        const isFood = game.food?.x === x && game.food?.y === y;
+        return <span key={`${x}-${y}`} className={`snake-cell ${segment ? `snake-segment ${segment.isHead ? 'snake-head' : ''} ${segment.alive ? '' : 'snake-dead'}` : ''} ${isFood ? 'snake-food' : ''}`} style={segment ? { '--snake-color': snakeColors[segment.playerIndex % snakeColors.length] } : undefined}>{isFood ? '✦' : ''}</span>;
+      })}
+    </div>
+  );
+}
 
 function drawSegment(canvas, segment) {
   if (!canvas) return;
@@ -122,6 +149,7 @@ function App() {
   const canvasRef = useRef(null);
   const [bingoCard, setBingoCard] = useState(null);
   const [bingoMarked, setBingoMarked] = useState(new Set());
+  const [snakeGame, setSnakeGame] = useState(null);
   const [musicEnabled, setMusicEnabled] = useState(true);
   const audioContextRef = useRef(null);
   const musicGainRef = useRef(null);
@@ -173,6 +201,10 @@ function App() {
     connection.on('game:finished', (data) => {
       setRoom(data.room);
       setScreen('finished');
+    });
+    connection.on('snake:state', (state) => {
+      setSnakeGame(state);
+      setScreen('snake');
     });
     connection.on('draw:turn', (turn) => {
       setDrawing({ turn, word: '', progress: null, result: null, guessResult: null, guessed: false });
@@ -243,7 +275,20 @@ function App() {
   }, [screen, drawing.turn, bluff.prompt, bluff.vote]);
 
   useEffect(() => {
-    const activeGame = ['question', 'results', 'finished', 'bingo', 'bingo-finished', 'drawing', 'draw-results', 'bluff-submit', 'bluff-vote', 'bluff-results'].includes(screen);
+    if (screen !== 'snake' || !room || !socket) return undefined;
+    const directions = { ArrowUp: 'UP', w: 'UP', ArrowDown: 'DOWN', s: 'DOWN', ArrowLeft: 'LEFT', a: 'LEFT', ArrowRight: 'RIGHT', d: 'RIGHT' };
+    const handleKeyDown = (event) => {
+      const direction = directions[event.key] || directions[event.key.toLowerCase()];
+      if (!direction) return;
+      event.preventDefault();
+      socket.emit('snake:direction', { code: room.code, direction });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [screen, room, socket]);
+
+  useEffect(() => {
+    const activeGame = ['question', 'results', 'finished', 'bingo', 'bingo-finished', 'drawing', 'draw-results', 'bluff-submit', 'bluff-vote', 'bluff-results', 'snake'].includes(screen);
     if (!musicEnabled || !activeGame || !audioContextRef.current) {
       window.clearInterval(musicTimerRef.current);
       musicTimerRef.current = null;
@@ -289,6 +334,7 @@ function App() {
 
   const isHost = room?.hostId === socket?.id;
   const minimumPlayers = ['drawing', 'bluff'].includes(room?.game) ? 2 : 1;
+  const snakeSelf = snakeGame?.players.find((player) => player.id === socket?.id);
   const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
   const inviteHost = isLocalHost && lanAddress ? lanAddress : location.hostname;
   const inviteOrigin = `${location.protocol}//${inviteHost}${location.port ? `:${location.port}` : ''}`;
@@ -403,6 +449,10 @@ function App() {
     socket.emit('bluff:vote', { code: room.code, choiceId });
   }
 
+  function sendSnakeDirection(direction) {
+    socket?.emit('snake:direction', { code: room?.code, direction });
+  }
+
   async function copyInvite() {
     try {
       await navigator.clipboard.writeText(inviteUrl);
@@ -480,6 +530,7 @@ function App() {
             <div className="game-row"><span className="game-icon draw">✎</span><span className="game-copy"><b>Tam sao thất bản</b><small>Vẽ · Đoán · Cười</small></span><span className="game-status">ĐANG CÓ</span></div>
             <div className="game-row"><span className="game-icon bluff">!</span><span className="game-copy"><b>Ai là kẻ nói dối?</b><small>Bịa đáp án · Tìm sự thật</small></span><span className="game-status">ĐANG CÓ</span></div>
             <div className="game-row"><span className="game-icon bingo-icon"><Grid3X3 size={18} /></span><span className="game-copy"><b>Bingo gia đình</b><small>Loto · Chạm số, nối hàng</small></span><span className="game-status">ĐANG CÓ</span></div>
+            <div className="game-row"><span className="game-icon snake-icon">🐍</span><span className="game-copy"><b>Rắn săn mồi</b><small>Nhiều người · Cùng ăn, né va chạm</small></span><span className="game-status">ĐANG CÓ</span></div>
           </div>
         </section>
       )}
@@ -499,7 +550,7 @@ function App() {
               <div className="start-art"><div className="art-spark spark-one">✳</div><div className="art-spark spark-two">✦</div><div className="art-disc"><PartyPopper size={42} /></div><div className="art-doodle">LET'S<br />PLAY!</div></div>
               <span className="panel-kicker">CHỌN TRÒ CHƠI</span>
               <h2>{gameNames[room.game] || gameNames.quiz}</h2>
-              <p>{room.game === 'drawing' ? '3 lượt vẽ bí mật, đoán đúng để ghi điểm.' : room.game === 'bluff' ? 'Bịa đáp án thật thuyết phục rồi tìm ra sự thật.' : room.game === 'bingo' ? 'Quay số, đánh dấu vé và nối hàng trước cả nhà.' : `10 câu hỏi · ${quizTopics.find((topic) => topic.id === room.topic)?.label || 'Tổng hợp'} · Trả lời nhanh để ghi điểm.`}</p>
+              <p>{room.game === 'drawing' ? '3 lượt vẽ bí mật, đoán đúng để ghi điểm.' : room.game === 'bluff' ? 'Bịa đáp án thật thuyết phục rồi tìm ra sự thật.' : room.game === 'bingo' ? 'Quay số, đánh dấu vé và nối hàng trước cả nhà.' : room.game === 'snake' ? 'Cùng ăn thức ăn, né tường và những con rắn khác. Người sống sót cuối cùng thắng!' : `10 câu hỏi · ${quizTopics.find((topic) => topic.id === room.topic)?.label || 'Tổng hợp'} · Trả lời nhanh để ghi điểm.`}</p>
               {isHost && <div className="game-selector" role="group" aria-label="Chọn trò chơi">{Object.entries(gameNames).map(([game, label]) => <button key={game} className={room.game === game ? 'selected' : ''} aria-pressed={room.game === game} onClick={() => selectGame(game)}>{label}</button>)}</div>}
               {room.game === 'quiz' && <div className="topic-picker"><div className="topic-picker-heading"><b>CHỌN CHỦ ĐỀ</b><small>{isHost ? 'Chủ phòng chọn cho cả nhà' : 'Chủ phòng đang chọn'}</small></div><div className="topic-grid">{quizTopics.map((topic) => <button key={topic.id} className={`topic-option ${room.topic === topic.id ? 'selected' : ''}`} disabled={!isHost} onClick={() => selectTopic(topic.id)} aria-pressed={room.topic === topic.id}><span>{topic.emoji}</span><b>{topic.label}</b></button>)}</div></div>}
               {isHost ? <><small className="minimum-players">{room.players.length < minimumPlayers ? `Cần ít nhất ${minimumPlayers} người chơi để bắt đầu.` : 'Chủ phòng không tính vào số người chơi.'}</small><button className="button button-primary start-button" disabled={room.players.length < minimumPlayers} onClick={startGame}>Bắt đầu chơi <ChevronRight size={17} /></button></> : <div className="waiting-host"><span className="pulse-dot" /> Đang chờ chủ phòng bắt đầu...</div>}
@@ -558,12 +609,26 @@ function App() {
         <section className="finished-layout bingo-finished-layout"><div className="finish-confetti">✦</div><div className="eyebrow"><Trophy size={15} /> BINGO!</div><h1>{room.bingoWinner.name} thắng<span className="period">!</span></h1><p>{room.bingoWinner.avatar} đã hoàn thành một hàng, cột hoặc đường chéo trước cả nhà.</p><div className="bingo-winner-card"><span>{room.bingoWinner.avatar}</span><b>Chúc mừng {room.bingoWinner.name}!</b><small>Phòng {room.code} · Đã quay {room.calledNumbers.length} số</small></div>{isHost ? <button className="button button-primary" onClick={leaveRoom}><Gamepad2 size={18} /> Về trang chủ</button> : <div className="waiting-host">Cảm ơn bạn đã chơi cùng cả nhà!</div>}</section>
       )}
 
+      {screen === 'snake' && room && snakeGame && (
+        <section className="snake-layout">
+          <div className="play-topline"><button className="back-link" onClick={leaveRoom}><ArrowLeft size={16} /> Rời phòng</button><span className="round-label">RẮN SĂN MỒI · NHỊP {snakeGame.tick}</span><span className="room-mini">PHÒNG {room.code}</span></div>
+          <div className="snake-content">
+            <div className="snake-heading"><div><div className="question-tag">🐍 CÙNG CHƠI TRÊN MỘT BẢN ĐỒ</div><h1>Rắn săn mồi</h1><p>{isHost ? 'Bạn đang xem bảng đấu trên màn hình lớn.' : snakeSelf?.alive ? 'Dùng phím mũi tên / WASD hoặc các nút bên dưới để lái rắn.' : 'Rắn của bạn đã bị loại — hãy cổ vũ người chơi còn lại nhé!'}</p></div><div className="snake-alive-count"><strong>{snakeGame.players.filter((player) => player.alive).length}</strong><small>còn sống</small></div></div>
+            <SnakeBoard game={snakeGame} />
+            <div className="snake-below-board">
+              <div className="snake-legend"><b>Người chơi</b>{snakeGame.players.slice().sort((a, b) => Number(b.alive) - Number(a.alive) || b.score - a.score).map((player) => <div className={`snake-player-row ${player.alive ? '' : 'eliminated'}`} key={player.id}><span className="snake-player-dot" style={{ '--snake-color': snakeColors[snakeGame.players.findIndex((entry) => entry.id === player.id) % snakeColors.length] }} /><span className="snake-player-name">{player.avatar} {player.name}{player.id === socket?.id ? ' (bạn)' : ''}</span><small>{player.alive ? 'Đang chơi' : 'Đã bị loại'}</small><strong>{player.score}</strong></div>)}</div>
+              {isHost ? <div className="snake-host-note"><span>👀</span><b>Màn hình chủ phòng</b><small>Người chơi điều khiển bằng điện thoại hoặc bàn phím. Né tường và rắn khác!</small></div> : <div className="snake-control-panel"><b>{snakeSelf?.alive ? 'Điều khiển rắn' : 'Đang ở chế độ khán giả'}</b><div className="snake-dpad" aria-label="Điều khiển hướng đi"><button aria-label="Đi lên" disabled={!snakeSelf?.alive} onClick={() => sendSnakeDirection('UP')}><ArrowUp size={21} /></button><button aria-label="Đi trái" disabled={!snakeSelf?.alive} onClick={() => sendSnakeDirection('LEFT')}><ArrowLeft size={21} /></button><button aria-label="Đi xuống" disabled={!snakeSelf?.alive} onClick={() => sendSnakeDirection('DOWN')}><ArrowDown size={21} /></button><button aria-label="Đi phải" disabled={!snakeSelf?.alive} onClick={() => sendSnakeDirection('RIGHT')}><ArrowRight size={21} /></button></div><small>Phím mũi tên hoặc WASD cũng dùng được</small></div>}
+            </div>
+          </div>
+        </section>
+      )}
+
       {screen === 'results' && results && room && (
         <section className="results-layout"><div className="play-topline"><span className="round-label">KẾT QUẢ CÂU {results.questionNumber}</span><span className="room-mini">PHÒNG {room.code}</span></div><div className="results-header"><div className="result-burst">✦</div><div className="question-tag">ĐÁP ÁN ĐÚNG LÀ</div><h1>{results.question.options[results.correctIndex]}</h1><p>{results.question.text}</p></div><div className="results-columns"><div className="answer-results"><div className="section-heading"><h2>Câu trả lời</h2><span>{results.answers.length} người chơi</span></div>{results.answers.map((answer) => <div className="result-player" key={answer.id}><span className="result-avatar">{answer.avatar}</span><span className="result-name">{answer.name}<small>{answer.answerIndex == null ? 'Chưa trả lời' : results.question.options[answer.answerIndex]}</small></span>{answer.isCorrect ? <span className="points positive">+{answer.pointsEarned} điểm</span> : <span className="points">+0 điểm</span>}</div>)}</div><div className="score-panel"><div className="section-heading"><h2><Trophy size={17} /> Bảng điểm</h2></div>{room.players.slice().sort((a, b) => b.score - a.score).map((player, index) => <div className="score-row" key={player.id}><span className="score-rank">{String(index + 1).padStart(2, '0')}</span><span>{player.avatar}</span><b>{player.name}</b><strong>{player.score}</strong></div>)}{isHost ? <button className="button button-dark next-button" onClick={continueGame}>Chuyển ngay <ChevronRight size={17} /></button> : null}<div className="waiting-host"><span className="pulse-dot" /> Tự động chuyển câu sau 2 giây…</div></div></div></section>
       )}
 
       {screen === 'finished' && room && (
-        <section className="finished-layout"><div className="finish-confetti">✦</div><div className="eyebrow"><Trophy size={15} /> TỔNG KẾT · {gameNames[room.game]}</div><h1>Cả nhà đỉnh quá<span className="period">!</span></h1><p>{room.game === 'drawing' ? 'Những nét vẽ và phỏng đoán thật đáng nhớ.' : room.game === 'bluff' ? 'Những đáp án nghe thật khó tin mà vẫn hợp lý.' : '10 câu hỏi · ' + (quizTopics.find((topic) => topic.id === room.topic)?.label || 'Tổng hợp') + ' · Thật nhiều tiếng cười.'} Đây là bảng điểm chung cuộc.</p><div className="final-scoreboard">{room.players.slice().sort((a, b) => b.score - a.score).map((player, index) => <div className={`final-player ${index === 0 ? 'winner' : ''}`} key={player.id}><span className="final-rank">{index === 0 ? <Crown size={18} /> : String(index + 1).padStart(2, '0')}</span><span className="final-avatar">{player.avatar}</span><b>{player.name}</b><strong>{player.score}<small>điểm</small></strong></div>)}</div>{isHost ? <button className="button button-primary" onClick={leaveRoom}><Gamepad2 size={18} /> Về trang chủ</button> : <div className="waiting-host">Cảm ơn bạn đã chơi cùng cả nhà!</div>}</section>
+        <section className="finished-layout"><div className="finish-confetti">✦</div><div className="eyebrow"><Trophy size={15} /> TỔNG KẾT · {gameNames[room.game]}</div><h1>{room.game === 'snake' ? room.snakeWinner?.name ? `${room.snakeWinner.name} đỉnh quá` : 'Ván chơi kết thúc' : 'Cả nhà đỉnh quá'}<span className="period">!</span></h1><p>{room.game === 'snake' ? room.players.length === 1 ? 'Bạn đã bị loại. Thử lại và xem mình ăn được bao nhiêu thức ăn nhé.' : 'Ván Rắn săn mồi đã kết thúc.' : room.game === 'drawing' ? 'Những nét vẽ và phỏng đoán thật đáng nhớ.' : room.game === 'bluff' ? 'Những đáp án nghe thật khó tin mà vẫn hợp lý.' : '10 câu hỏi · ' + (quizTopics.find((topic) => topic.id === room.topic)?.label || 'Tổng hợp') + ' · Thật nhiều tiếng cười.'} {room.game === 'snake' && room.players.length === 1 ? '' : 'Đây là bảng điểm chung cuộc.'}</p><div className="final-scoreboard">{room.players.slice().sort((a, b) => b.score - a.score).map((player, index) => <div className={`final-player ${player.id === room.snakeWinner?.id || (room.game !== 'snake' && index === 0) ? 'winner' : ''}`} key={player.id}><span className="final-rank">{player.id === room.snakeWinner?.id || (room.game !== 'snake' && index === 0) ? <Crown size={18} /> : String(index + 1).padStart(2, '0')}</span><span className="final-avatar">{player.avatar}</span><b>{player.name}</b><strong>{player.score}<small>{room.game === 'snake' ? 'thức ăn' : 'điểm'}</small></strong></div>)}</div>{isHost ? <button className="button button-primary" onClick={leaveRoom}><Gamepad2 size={18} /> Về trang chủ</button> : <div className="waiting-host">Cảm ơn bạn đã chơi cùng cả nhà!</div>}</section>
       )}
       <footer className="footer"><span>NHÀ MÌNH CHƠI GÌ?</span><span>ĐƯỢC LÀM ĐỂ CHƠI CÙNG NHAU <Heart size={12} fill="currentColor" /></span></footer>
     </main>
